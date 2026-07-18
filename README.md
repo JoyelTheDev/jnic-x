@@ -90,7 +90,7 @@ flowchart LR
   E --> F[Pack as cn/sky/jnic/uuid.dat]
   F --> G[SkyJarLoader writes output.jar]
   G --> H[Runtime JNICLoader unpacks + System.load]
-  H --> I[registerNatives(class)]
+  H --> I["registerNatives(class)"]
 ```
 
 ---
