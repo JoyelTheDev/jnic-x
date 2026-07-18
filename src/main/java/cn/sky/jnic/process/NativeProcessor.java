@@ -1,6 +1,8 @@
 package cn.sky.jnic.process;
 
 import cn.sky.jnic.Jnic;
+import cn.sky.jnic.crypto.ChaCha20;
+import cn.sky.jnic.crypto.DatKeyGen;
 import cn.sky.jnic.generator.CGenerator;
 import cn.sky.jnic.utils.MatcherUtils;
 import cn.sky.jnic.utils.asm.ClassWrapper;
@@ -25,6 +27,9 @@ import java.nio.file.StandardCopyOption;
 import java.util.*;
 
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
 
 public class NativeProcessor {
     @Getter
@@ -32,6 +37,8 @@ public class NativeProcessor {
     private final CGenerator generator;
     private final List<String> generatedNativeMethods = new ArrayList<>();
     private final Set<ClassWrapper> processedClasses = new HashSet<>();
+    @Getter
+    private DatKeyGen.KeyMaterial keyMaterial;
 
     public NativeProcessor(Jnic jnic) {
         this.jnic = jnic;
@@ -56,14 +63,10 @@ public class NativeProcessor {
     public void process() {
         Jnic.getLogger().info("Starting native processing...");
 
-        HashMap<String, ClassWrapper> temp = new HashMap<>();
         for (ClassWrapper classWrapper : jnic.getClasses().values()) {
-            if (!shouldProcessClass(classWrapper))
-                continue;
+            if (!shouldProcessClass(classWrapper)) continue;
 
             boolean classModified = false;
-            // Iterate over a copy to avoid ConcurrentModificationException when adding
-            // helper methods
             List<MethodWrapper> methods = new ArrayList<>(classWrapper.getMethods());
             for (MethodWrapper methodWrapper : methods) {
                 if (shouldProcessMethod(methodWrapper)) {
@@ -71,19 +74,11 @@ public class NativeProcessor {
                     classModified = true;
                 }
             }
-
-            if (classModified) {
-                processedClasses.add(classWrapper);
-                injectLoader(classWrapper, temp);
-            }
+            if (classModified) processedClasses.add(classWrapper);
         }
 
-        jnic.getClasses().putAll(temp);
-
-        // Finalize generation (write C files, compile, etc.)
         generator.finalizeGeneration();
 
-        // Extract jni.h from resources
         try (InputStream is = getClass().getResourceAsStream("/jni.h")) {
             if (is != null) {
                 Files.copy(is, new File(jnic.getTmpdir(), "jni.h").toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -94,16 +89,11 @@ public class NativeProcessor {
             Jnic.getLogger().error("Failed to extract jni.h: " + e.getMessage());
         }
 
-        // Compile using Zig
         File cFile = new File(jnic.getTmpdir(), Jnic.getInstance().getTempC().toString() + ".c");
 
-        // Output directory: Use a temporary directory for compilation artifacts
         if (cFile.exists()) {
             ZigCompiler.compile(cFile, jnic.getTmpdir(), jnic.getConfig().getTargets());
 
-            // Collect compiled libraries and add to Jnic resources map
-            // This ensures they are included in the output JAR
-            // Collect compiled libraries and pack them into native.dat
             File[] files = jnic.getTmpdir().listFiles();
             if (files != null) {
                 try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -130,32 +120,33 @@ public class NativeProcessor {
                         Jnic.getLogger().info("Packed library: " + lib.getName());
                     }
 
-                    byte[] data = baos.toByteArray();
-                    // Encrypt (XOR 0x5F)
-                    for (int i = 0; i < data.length; i++) {
-                        data[i] ^= 0x5F;
-                    }
+                    byte[] plaintext = baos.toByteArray();
+
+                    keyMaterial = DatKeyGen.generate(jnic.getTempOut());
+                    byte[] data = ChaCha20.crypt(plaintext, keyMaterial.key(), keyMaterial.nonce());
 
                     jnic.getResources().put("cn/sky/jnic/" + jnic.getTempOut().toString() + ".dat", data);
-                    Jnic.getLogger().info("Generated encrypted dat file with " + libsToPack.size() + " libraries.");
+                    Jnic.getLogger().info("Generated ChaCha20-encrypted dat file with " + libsToPack.size() + " libraries.");
 
                 } catch (IOException e) {
                     Jnic.getLogger().error("Failed to pack native libraries: " + e.getMessage());
                 }
             }
 
-            // Clean up temp dir (optional, good for debug to keep)
-            //jnic.getTmpdir().delete();
-
         } else {
             Jnic.getLogger().error("Native source file not found: " + cFile.getAbsolutePath());
         }
+
+        HashMap<String, ClassWrapper> temp = new HashMap<>();
+        for (ClassWrapper classWrapper : processedClasses) {
+            injectLoader(classWrapper, temp);
+        }
+        jnic.getClasses().putAll(temp);
     }
 
     private boolean shouldProcessClass(ClassWrapper classWrapper) {
         String className = classWrapper.getName();
 
-        // 1. Check excludes first
         List<String> excludes = jnic.getConfig().getExclude();
         if (excludes != null) {
             for (String exclude : excludes) {
@@ -165,7 +156,6 @@ public class NativeProcessor {
             }
         }
 
-        // 2. Check includes
         List<String> includes = jnic.getConfig().getInclude();
         if (includes != null && !includes.isEmpty()) {
             boolean included = false;
@@ -179,13 +169,11 @@ public class NativeProcessor {
                 return false;
         }
 
-        // Basic sanity checks
         return (classWrapper.getClassNode().access & Opcodes.ACC_INTERFACE) == 0;
     }
 
     private boolean shouldProcessMethod(MethodWrapper methodWrapper) {
         String name = methodWrapper.getOriginalName();
-        // Skip constructors and static initializers
         if ("<init>".equals(name) || "<clinit>".equals(name)) {
             return false;
         }
@@ -245,10 +233,14 @@ public class NativeProcessor {
 
                     String placeholder = "000000000000000000000000000000000000";
                     String replacement = jnic.getTempOut().toString();
-
-                    byte[] processedBytes = replacePlaceholderInBytes(originalBytes,
+                    byte[] processedBytes = replacePlaceholderInBytes(
+                            originalBytes,
                             placeholder.getBytes(StandardCharsets.UTF_8),
                             replacement.getBytes(StandardCharsets.UTF_8));
+
+                    if (keyMaterial != null) {
+                        processedBytes = patchKeyConstants(processedBytes, keyMaterial);
+                    }
 
                     classes.put(loader, ClassWrapper.from(new ClassReader(processedBytes)));
                 }
@@ -258,8 +250,8 @@ public class NativeProcessor {
         }
 
         InsnList il = new InsnList();
-        il.add(new LdcInsnNode("jnic")); // Library name
-        il.add(new LdcInsnNode(Type.getObjectType(classWrapper.getName()))); // Push class
+        il.add(new LdcInsnNode("jnic"));
+        il.add(new LdcInsnNode(Type.getObjectType(classWrapper.getName())));
         il.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "cn/sky/jnic/JNICLoader", "load",
                 "(Ljava/lang/String;Ljava/lang/Class;)V", false));
 
@@ -280,13 +272,10 @@ public class NativeProcessor {
     private void processMethod(ClassWrapper owner, MethodWrapper method) {
         Jnic.getLogger().info("Processing method: " + owner.getName() + "." + method.getOriginalName());
 
-        // Handle INVOKEDYNAMIC before generation
         handleInvokeDynamic(owner, method);
 
-        // 1. Generate C code for the method
         String cCode = generator.generateMethod(owner, method);
 
-        // 2. Modify Java method to be native
         method.getMethodNode().access |= Opcodes.ACC_NATIVE;
         method.getMethodNode().instructions.clear();
         method.getMethodNode().tryCatchBlocks.clear();
@@ -308,11 +297,9 @@ public class NativeProcessor {
         for (InvokeDynamicInsnNode indy : indyNodes) {
             String helperName = "indy_wrapper_" + Math.abs(indy.hashCode());
 
-            // Create helper method: static synthetic
             MethodNode helper = new MethodNode(Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, helperName, indy.desc, null,
                     null);
 
-            // Generate body
             InsnList il = helper.instructions;
             Type[] args = Type.getArgumentTypes(indy.desc);
             int varIndex = 0;
@@ -321,20 +308,105 @@ public class NativeProcessor {
                 varIndex += arg.getSize();
             }
 
-            // Add the invokedynamic instruction (clone it to be safe)
             il.add(indy.clone(null));
 
-            // Return
             Type returnType = Type.getReturnType(indy.desc);
             il.add(new InsnNode(returnType.getOpcode(Opcodes.IRETURN)));
 
-            // Add helper to class
             owner.addMethod(helper);
 
-            // Replace original instruction with INVOKESTATIC to helper
             instructions.set(indy,
                     new MethodInsnNode(Opcodes.INVOKESTATIC, owner.getName(), helperName, indy.desc, false));
         }
+    }
+
+    private byte[] patchKeyConstants(byte[] classBytes, DatKeyGen.KeyMaterial km) {
+        ClassReader cr = new ClassReader(classBytes);
+        ClassWriter cw = new ClassWriter(cr, 0);
+
+        java.util.Map<String, Integer> patches = new java.util.HashMap<>();
+        int[] kp = km.keyParts(),   km2 = km.keyMasks();
+        int[] np = km.nonceParts(), nm  = km.nonceMasks();
+        for (int i = 0; i < 8; i++) {
+            patches.put("K"  + i, kp[i]);
+            patches.put("KM" + i, km2[i]);
+        }
+        for (int i = 0; i < 3; i++) {
+            patches.put("N"  + i, np[i]);
+            patches.put("NM" + i, nm[i]);
+        }
+
+        cr.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public FieldVisitor visitField(int access, String name, String descriptor,
+                                           String signature, Object value) {
+                Object newValue = patches.containsKey(name) ? patches.get(name) : value;
+                return super.visitField(access, name, descriptor, signature, newValue);
+            }
+
+            @Override
+            public org.objectweb.asm.MethodVisitor visitMethod(int access, String name,
+                    String descriptor, String signature, String[] exceptions) {
+                org.objectweb.asm.MethodVisitor mv =
+                        super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!"<clinit>".equals(name)) return mv;
+
+                return new org.objectweb.asm.MethodVisitor(Opcodes.ASM9, mv) {
+                    private Integer pendingPatch = null;
+
+                    @Override
+                    public void visitLdcInsn(Object cst) {
+                        super.visitLdcInsn(cst);
+                    }
+
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fname, String fdesc) {
+                        if (opcode == Opcodes.PUTSTATIC && patches.containsKey(fname)) {
+                        }
+                        super.visitFieldInsn(opcode, owner, fname, fdesc);
+                    }
+                };
+            }
+        }, 0);
+
+        byte[] firstPass = cw.toByteArray();
+        ClassReader cr2 = new ClassReader(firstPass);
+        ClassWriter cw2 = new ClassWriter(cr2, ClassWriter.COMPUTE_MAXS);
+
+        cr2.accept(new ClassVisitor(Opcodes.ASM9, cw2) {
+            @Override
+            public org.objectweb.asm.MethodVisitor visitMethod(int access, String name,
+                    String descriptor, String signature, String[] exceptions) {
+                if (!"<clinit>".equals(name)) {
+                    return super.visitMethod(access, name, descriptor, signature, exceptions);
+                }
+                org.objectweb.asm.tree.MethodNode mn =
+                    new org.objectweb.asm.tree.MethodNode(Opcodes.ASM9, access, name,
+                        descriptor, signature, exceptions);
+                return new org.objectweb.asm.MethodVisitor(Opcodes.ASM9, mn) {
+                    @Override
+                    public void visitEnd() {
+                        super.visitEnd();
+                        AbstractInsnNode[] insns = mn.instructions.toArray();
+                        for (int i = 0; i < insns.length - 1; i++) {
+                            AbstractInsnNode cur  = insns[i];
+                            AbstractInsnNode next = insns[i + 1];
+                            if (next instanceof org.objectweb.asm.tree.FieldInsnNode fin
+                                    && fin.opcode == Opcodes.PUTSTATIC
+                                    && patches.containsKey(fin.name)) {
+                                int newVal = patches.get(fin.name);
+                                org.objectweb.asm.tree.AbstractInsnNode replacement =
+                                    new org.objectweb.asm.tree.LdcInsnNode(newVal);
+                                mn.instructions.set(cur, replacement);
+                            }
+                        }
+                        mn.accept(super.mv);
+                    }
+                };
+            }
+        }, 0);
+
+        return cw2.toByteArray();
     }
 
     private byte[] replacePlaceholderInBytes(byte[] original, byte[] placeholder, byte[] replacement) {
