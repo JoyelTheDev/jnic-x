@@ -1,39 +1,39 @@
 # Jnic
 
-Jnic 是一个将 Java 字节码方法“本地化”的构建工具：它会在构建阶段扫描 `input.jar` 中符合规则的方法，将其改写为 `native`，同时生成对应的 C 代码，并通过 Zig 交叉编译出多平台动态库；最终把动态库以加密资源的形式打包回输出 JAR，运行期再由注入的 `JNICLoader` 自动解包并加载。
+Jnic is a build tool that "nativizes" Java bytecode methods: at build time it scans methods in `input.jar` matching configured rules, rewrites them as `native`, generates corresponding C code, cross-compiles multi-platform dynamic libraries via Zig, and finally packs the libraries back into the output JAR as encrypted resources — at runtime, an injected `JNICLoader` automatically unpacks and loads them.
 
-> 适用场景：代码保护/混淆实验、JNI/字节码工程学习、构建期生成本地桥接层等。  
-> 注意：这是“语义保持”的困难问题，复杂字节码/特殊指令/反射等场景可能不完全等价。
-
----
-
-## 特性
-
-- 构建期处理：输入 JAR → 生成 C → Zig 编译 → 输出 JAR
-- 运行期自动加载：注入 `JNICLoader.load("jnic", clazz)` 到被处理类的 `<clinit>`
-- 多目标交叉编译：Windows / Linux / macOS / Android（由配置 `target` 决定）
-- 资源打包：将编译产物打包为 `cn/sky/jnic/<uuid>.dat` 并做 XOR 加密
-- 可选字符串加密、简单控制流处理（见 `config.yml` 的 `obfuscation`, 仅实现了最简单的字符串异或加密）
+> Use cases: code protection/obfuscation experiments, JNI/bytecode engineering study, build-time native bridge layer generation, etc.
+> Note: This is a hard "semantic preservation" problem — complex bytecode, special instructions, reflection, etc. may not be fully equivalent.
 
 ---
 
-## 快速开始
+## Features
 
-### 1) 环境要求
+- Build-time processing: input JAR → generate C → Zig compile → output JAR
+- Runtime auto-loading: injects `JNICLoader.load("jnic", clazz)` into the `<clinit>` of processed classes
+- Multi-target cross-compilation: Windows / Linux / macOS / Android (driven by the `target` config)
+- Resource packing: compiles output packed as `cn/sky/jnic/<uuid>.dat` with XOR encryption
+- Optional string encryption and basic control flow handling (see `obfuscation` in `config.yml` — only a simple XOR string cipher is currently implemented)
 
-- JDK 17（`build.gradle` 目标为 Java 17）
-- Windows 下可直接使用仓库内置的 Zig（`zig-x86_64-windows/`）；其他系统请自行准备 `zig` 并确保可在 PATH 中调用
+---
 
-### 2) 准备输入
+## Quick Start
 
-把待处理的 JAR 放到项目根目录（或自行改路径）：
+### 1) Requirements
 
-- `input.jar`：需要被处理的输入 JAR
-- `libs/`：可选依赖库（用于补全 classpath，便于分析/生成）
+- JDK 17 (`build.gradle` targets Java 17)
+- On Windows, the bundled Zig in `zig-x86_64-windows/` can be used directly; on other systems, install `zig` yourself and ensure it's on `PATH`
 
-### 3) 配置 `config.yml`
+### 2) Prepare Input
 
-项目根目录的 `config.yml` 示例（可按需修改）：
+Place the JAR to process in the project root (or adjust paths as needed):
+
+- `input.jar`: the input JAR to be processed
+- `libs/`: optional dependency libraries (used to complete the classpath for analysis/generation)
+
+### 3) Configure `config.yml`
+
+Example `config.yml` in the project root (modify as needed):
 
 ```yml
 input: ./input.jar
@@ -46,7 +46,7 @@ target:
   # - ANDROID_ARM64
 includes:
   - "*"
-excludes: 
+excludes:
   - ""
 obfuscation:
   stringEncryption: true
@@ -54,52 +54,52 @@ obfuscation:
   antiDebug: true
 ```
 
-说明：
+Notes:
 
-- `includes/excludes` 使用类的 internal name（如 `cn/sky/**`，分隔符为 `/`），支持 `*`、`**`、`?`
-- 建议不要把 `includes/excludes` 留成空数组项（如 `-`），避免匹配逻辑出现空字符串
+- `includes/excludes` use class internal names (e.g. `cn/sky/**`, separator is `/`), supporting `*`, `**`, `?`
+- Avoid leaving `includes/excludes` as empty array entries (e.g. bare `-`), to prevent empty-string matching logic issues
 
-### 4) 构建并运行
+### 4) Build and Run
 
-构建：
+Build:
 
 ```bash
 ./gradlew.bat build
 ```
 
-运行（生成工具本体）：
+Run (to execute the tool itself):
 
 ```bash
 java -jar jnic.jar
 ```
 
-运行完成后将生成：
+Output after completion:
 
-- `output.jar`：包含被改写为 `native` 的类，以及注入的加载器与加密后的本地库资源
+- `output.jar`: contains classes rewritten as `native`, plus the injected loader and encrypted native library resources
 
 ---
 
-## 工作原理（流程图）
+## How It Works (Flowchart)
 
 ```mermaid
 flowchart LR
-  A[input.jar] --> B[SkyJarLoader 读取 class/资源]
-  B --> C[NativeProcessor 扫描/筛选方法]
-  C --> D[CGenerator 生成 native-lib.c]
-  D --> E[ZigCompiler 交叉编译多目标动态库]
-  E --> F[打包为 cn/sky/jnic/uuid.dat]
-  F --> G[SkyJarLoader 写出 output.jar]
-  G --> H[运行期 JNICLoader 解包 + System.load]
-  H --> I[registerNatives（class）]
+  A[input.jar] --> B[SkyJarLoader reads classes/resources]
+  B --> C[NativeProcessor scans/filters methods]
+  C --> D[CGenerator generates native-lib.c]
+  D --> E[ZigCompiler cross-compiles multi-target dynamic libs]
+  E --> F[Pack as cn/sky/jnic/uuid.dat]
+  F --> G[SkyJarLoader writes output.jar]
+  G --> H[Runtime JNICLoader unpacks + System.load]
+  H --> I[registerNatives(class)]
 ```
 
 ---
 
-## 目标平台与命名规则
+## Target Platforms and Naming
 
-### 配置 target → Zig target
+### Config target → Zig target
 
-在 [ZigCompiler.java](src/main/java/cn/sky/jnic/process/ZigCompiler.java) 内部映射：
+Internal mapping in [ZigCompiler.java](src/main/java/cn/sky/jnic/process/ZigCompiler.java):
 
 - `WINDOWS_X86_64` → `x86_64-windows`
 - `LINUX_X86_64` → `x86_64-linux`
@@ -110,52 +110,54 @@ flowchart LR
 - `ANDROID_X86` → `x86-linux-android`
 - `ANDROID_X86_64` → `x86_64-linux-android`
 
-### 动态库文件名（编译期 ↔ 运行期统一）
+### Dynamic library filename (unified between compile-time and runtime)
 
-运行期加载器 `JNICLoader` 会根据系统信息拼出目标库名：
+The runtime loader `JNICLoader` assembles the target library name from system info:
 
 ```
 lib<libName>_<arch>-<platform>.<ext>
 ```
 
-示例：
+Examples:
 
-- Windows x86_64：`libjnic_x86_64-windows.dll`
-- Linux x86_64：`libjnic_x86_64-linux.so`
-- Android arm64：`libjnic_aarch64-android.so`
-
----
-
-## 常见问题
-
-### 1) Zig 找不到怎么办
-
-- Windows：优先使用jnic.jar根目录下的 `zig-x86_64-windows/`（或自行把 `zig` 加入 PATH）
-- 非 Windows：请安装 zig，并保证命令行能直接运行 `zig`
+- Windows x86_64: `libjnic_x86_64-windows.dll`
+- Linux x86_64: `libjnic_x86_64-linux.so`
+- Android arm64: `libjnic_aarch64-android.so`
 
 ---
 
-## 项目结构（简要）
+## FAQ
+
+### 1) Zig not found
+
+- Windows: use the bundled `zig-x86_64-windows/` in the jnic.jar directory (or add `zig` to `PATH` manually)
+- Non-Windows: install Zig and ensure `zig` is directly invokable from the command line
+
+---
+
+## Project Structure (Summary)
 
 - `src/main/java/cn/sky/jnic/`
-  - `Jnic`：主流程与临时目录/资源键生成
-  - `SkyJarLoader`：读取/写出 JAR（classes + resources）
-  - `process/NativeProcessor`：筛选方法、注入加载器、打包本地库
-  - `generator/CGenerator`：C 代码生成与 `RegisterNatives` 生成
-  - `process/ZigCompiler`：Zig 编译与目标映射
-  - `JNICLoader`：运行期解包并加载动态库
-- `src/main/resources/jni.h`：打包的 JNI 头文件（用于 Zig 编译）
+  - `Jnic`: main flow, temp directory and resource key generation
+  - `SkyJarLoader`: read/write JAR (classes + resources)
+  - `process/NativeProcessor`: method filtering, loader injection, native lib packing
+  - `generator/CGenerator`: C code generation and `RegisterNatives` generation
+  - `process/ZigCompiler`: Zig compilation and target mapping
+  - `JNICLoader`: runtime unpacking and dynamic library loading
+- `src/main/resources/jni.h`: bundled JNI header (used during Zig compilation)
 
 ---
 
-## 后续待更
+## Roadmap
 
-### 1) native层性能优化
+### 1) Native layer performance optimization
 
-### 2) 增加控制流混淆以及增加字符串混淆强度
+### 2) Add control flow obfuscation and stronger string encryption
 
-### 3) Rename混淆
+### 3) Rename obfuscation
 
-## 免责声明
+---
 
-本项目涉及对字节码的改写与本地代码生成，可能引入兼容性与安全风险。请在受控环境中使用，并自行评估输出产物的稳定性与合规性。
+## Disclaimer
+
+This project involves bytecode rewriting and native code generation, which may introduce compatibility and security risks. Use only in controlled environments and evaluate the stability and compliance of output artifacts yourself.
