@@ -30,13 +30,10 @@ dependencies {
     implementation 'org.ow2.asm:asm-tree:9.9'
     implementation 'org.ow2.asm:asm-analysis:9.9'
     implementation 'org.ow2.asm:asm-util:9.9'
-
     implementation 'org.apache.logging.log4j:log4j-api:2.17.1'
     implementation 'org.apache.logging.log4j:log4j-core:2.17.1'
-
     implementation "org.bspfsystems:yamlconfiguration:3.0.2"
 
-    // Lombok注解处理
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
 }
