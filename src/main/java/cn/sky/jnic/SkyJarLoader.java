@@ -59,12 +59,9 @@ public class SkyJarLoader {
         Jnic.getLogger().info("Saving output to: " + outputFile.getAbsolutePath());
         
         try (JarOutputStream jos = new JarOutputStream(new FileOutputStream(outputFile))) {
-            // 2. Write classes
             for (Map.Entry<String, ClassWrapper> entry : Jnic.getInstance().getClasses().entrySet()) {
                 String className = entry.getKey();
                 ClassWrapper wrapper = entry.getValue();
-                
-                // Ensure class name uses / as separator for JAR entry
                 String entryName = className.replace('\\', '/');
                 if (entryName.indexOf('/') < 0 && entryName.indexOf('.') >= 0) {
                     entryName = entryName.replace('.', '/');
@@ -77,7 +74,6 @@ public class SkyJarLoader {
                 jos.closeEntry();
             }
             
-            // Write resources (includes compiled libs added by NativeProcessor)
             for (Map.Entry<String, byte[]> entry : Jnic.getInstance().getResources().entrySet()) {
                 String name = entry.getKey();
                 byte[] data = entry.getValue();

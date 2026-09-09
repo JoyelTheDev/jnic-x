@@ -41,7 +41,6 @@ public class ZigCompiler {
     }
 
     private static File findZigExecutable() {
-        // Search in common locations
         File[] searchPaths = {
             new File("zig.exe"),
             new File("zig/zig.exe"),
@@ -53,7 +52,6 @@ public class ZigCompiler {
             if (f.exists()) return f;
         }
 
-        // Search in subdirectories (depth 2)
         File currentDir = new File(".");
         File[] files = currentDir.listFiles();
         if (files != null) {
@@ -62,7 +60,6 @@ public class ZigCompiler {
                      File zig = new File(file, "zig.exe");
                      if (zig.exists()) return zig;
                      
-                     // Check deeper level (e.g. zig-windows-x86_64/zig.exe)
                      File[] subFiles = file.listFiles();
                      if (subFiles != null) {
                          for (File sub : subFiles) {
@@ -76,7 +73,6 @@ public class ZigCompiler {
             }
         }
         
-        // Specific check for build/libs structure
         File buildLibs = new File("build/libs");
         if (buildLibs.exists() && buildLibs.isDirectory()) {
              File[] libsFiles = buildLibs.listFiles();
@@ -95,7 +91,7 @@ public class ZigCompiler {
 
     private static void compileTarget(File cFile, File outputDir, String target) {
         try {
-            String zigPath = "zig"; // Default to PATH
+            String zigPath = "zig";
             File zigExe = findZigExecutable();
             if (zigExe != null && zigExe.exists()) {
                 zigPath = zigExe.getAbsolutePath();

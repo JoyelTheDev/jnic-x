@@ -63,8 +63,6 @@ public class Jnic {
     private void cleanup() {
         logger.info("Skipping cleanup for debug...");
         deleteDirectory(this.tmpdir);
-        /*File zigCache = new File(this.configFile.getParentFile(), ".zig-cache");
-        deleteDirectory(zigCache);*/
     }
 
     private void deleteFile(File file) {

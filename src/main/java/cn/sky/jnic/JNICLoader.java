@@ -34,12 +34,18 @@ public class JNICLoader {
             0x3320646e, 
             0x79622d32, 
             0x6b206574,
-            key[0], key[1], 
-            key[2], key[3], 
-            key[4], key[5], 
-            key[6], key[7],
-            counter, nonce[0], 
-            nonce[1], nonce[2]
+            key[0], 
+            key[1], 
+            key[2], 
+            key[3], 
+            key[4], 
+            key[5], 
+            key[6], 
+            key[7],
+            counter, 
+            nonce[0], 
+            nonce[1], 
+            nonce[2]
         };
         int[] w = s.clone();
         for (int i = 0; i < 10; i++) {
