@@ -392,7 +392,7 @@ public class NativeProcessor {
                             AbstractInsnNode cur  = insns[i];
                             AbstractInsnNode next = insns[i + 1];
                             if (next instanceof org.objectweb.asm.tree.FieldInsnNode fin
-                                    && fin.opcode == Opcodes.PUTSTATIC
+                                    && fin.getOpcode() == Opcodes.PUTSTATIC
                                     && patches.containsKey(fin.name)) {
                                 int newVal = patches.get(fin.name);
                                 org.objectweb.asm.tree.AbstractInsnNode replacement =
