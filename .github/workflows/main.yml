@@ -30,7 +30,7 @@ jobs:
       - name: Build with Gradle
         run: |
           chmod +x ./gradlew
-          ./gradlew shadowJar --stacktrace
+          ./gradlew jar --stacktrace
 
       - name: Find JAR
         run: |

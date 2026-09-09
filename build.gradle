@@ -1,6 +1,5 @@
 plugins {
     id 'java'
-    id 'com.github.johnrengelman.shadow' version '7.1.2'
 }
 
 group = 'cn.sky'
@@ -9,8 +8,8 @@ version = '1.0-SNAPSHOT'
 compileJava {
     options.encoding = 'UTF-8'
     options.compilerArgs.add('-Xlint:unchecked')
-    targetCompatibility = '17'
-    sourceCompatibility = '17'
+    targetCompatibility = '25'
+    sourceCompatibility = '25'
 }
 
 tasks.withType(JavaCompile) {
@@ -46,10 +45,3 @@ jar {
         )
     }
 }
-
-shadowJar {
-    archiveFileName = 'jnic.jar'
-}
-
-
-build.dependsOn('shadowJar')
