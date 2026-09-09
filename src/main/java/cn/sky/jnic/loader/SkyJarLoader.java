@@ -1,8 +1,8 @@
-package cn.sky.jnic;
+package cn.sky.jnic.loader;
 
 import cn.sky.jnic.utils.asm.ClassWrapper;
 import org.objectweb.asm.ClassReader;
-
+import cn.sky.jnic.Jnic;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;

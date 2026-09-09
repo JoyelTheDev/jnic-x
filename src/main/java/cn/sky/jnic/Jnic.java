@@ -68,7 +68,7 @@ public class Jnic {
     private void deleteFile(File file) {
         if (!file.exists()) return;
         if (!file.delete()) {
-            logger.warn("无法删除文件: " + file.getAbsolutePath());
+            logger.warn("Unable to delete the file: " + file.getAbsolutePath());
         }
     }
 

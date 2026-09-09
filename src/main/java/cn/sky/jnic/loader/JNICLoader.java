@@ -1,4 +1,4 @@
-package cn.sky.jnic;
+package cn.sky.jnic.loader;
 
 import java.io.File;
 import java.io.FileOutputStream;
