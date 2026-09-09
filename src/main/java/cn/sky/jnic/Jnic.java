@@ -7,7 +7,7 @@ import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bspfsystems.yamlconfiguration.file.YamlConfiguration;
-import cn.sky.jnic.SkyJarLoader;
+import cn.sky.jnic.loader.SkyJarLoader;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
